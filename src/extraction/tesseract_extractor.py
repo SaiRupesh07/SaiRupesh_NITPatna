@@ -1,172 +1,208 @@
+import pytesseract
+from PIL import Image, ImageEnhance, ImageFilter
 import requests
 import io
 import re
 import logging
+import numpy as np
 from typing import Dict, List, Any, Optional
 
 class TesseractExtractor:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self.medical_terms = ['tab', 'cap', 'syr', 'inj', 'mg', 'ml', 'medicine', 'drug', 'pharma', 'tablet', 'capsule', 'syrup', 'injection']
         
     def extract_text_from_content(self, document_content: bytes) -> str:
-        """Extract text from document content bytes - No Pillow dependency"""
+        """Enhanced OCR with better preprocessing"""
         try:
-            # Try basic OCR if dependencies available
-            try:
-                import pytesseract
-                from PIL import Image
-                
-                image = Image.open(io.BytesIO(document_content))
-                custom_config = r'--oem 3 --psm 6'
-                text = pytesseract.image_to_string(image, config=custom_config)
-                return text.strip()
-                
-            except ImportError:
-                # Pillow/pytesseract not available - use fallback
-                self.logger.info("OCR dependencies not available, using fallback")
-                return ""
-                
+            image = Image.open(io.BytesIO(document_content))
+            processed_image = self._advanced_preprocessing(image)
+            
+            # Multiple OCR attempts with different configurations
+            text = self._robust_ocr(processed_image)
+            
+            return text.strip()
         except Exception as e:
             self.logger.error(f"OCR extraction failed: {e}")
             return ""
     
-    def download_and_process_image(self, image_url: str) -> Optional[bytes]:
-        """Download image from URL - returns bytes instead of PIL Image"""
+    def _advanced_preprocessing(self, image: Image.Image) -> Image.Image:
+        """Advanced image preprocessing for better OCR"""
         try:
-            response = requests.get(image_url, timeout=30)
-            response.raise_for_status()
-            return response.content
+            # Convert to grayscale for better OCR
+            if image.mode != 'L':
+                image = image.convert('L')
+            
+            # Resize for better resolution
+            if image.size[0] < 1000:
+                scale_factor = 2000 / image.size[0]
+                new_size = (int(image.size[0] * scale_factor), int(image.size[1] * scale_factor))
+                image = image.resize(new_size, Image.LANCZOS)
+            
+            # Enhance contrast
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(2.0)
+            
+            # Enhance sharpness
+            enhancer = ImageEnhance.Sharpness(image)
+            image = enhancer.enhance(2.0)
+            
+            # Apply slight blur to reduce noise
+            image = image.filter(ImageFilter.MedianFilter(3))
+            
+            return image
             
         except Exception as e:
-            self.logger.error(f"Error downloading image: {e}")
-            return None
-    
-    def _enhance_image(self, image: object) -> object:
-        """Enhanced image - simplified version that handles both PIL Image and bytes"""
-        try:
-            # If it's already bytes, return as is
-            if isinstance(image, bytes):
-                return image
-                
-            # Try to enhance if it's a PIL Image and Pillow is available
-            try:
-                from PIL import Image, ImageEnhance
-                
-                # Resize for better resolution if image is too small
-                if image.size[0] < 800:
-                    new_width = image.size[0] * 2
-                    new_height = image.size[1] * 2
-                    image = image.resize((new_width, new_height), Image.LANCZOS)
-                
-                # Enhance contrast
-                enhancer = ImageEnhance.Contrast(image)
-                image = enhancer.enhance(1.5)
-                
-                # Enhance sharpness
-                enhancer = ImageEnhance.Sharpness(image)
-                image = enhancer.enhance(1.5)
-                
-                return image
-                
-            except ImportError:
-                # Pillow not available, return original
-                return image
-                
-        except Exception as e:
-            self.logger.warning(f"Image enhancement failed: {e}")
+            self.logger.warning(f"Advanced preprocessing failed: {e}")
             return image
     
-    def extract_text(self, image: object) -> str:
-        """Extract text from image (PIL Image or bytes)"""
+    def _robust_ocr(self, image: Image.Image) -> str:
+        """Multiple OCR attempts with different configurations"""
+        ocr_results = []
+        
+        # Configuration 1: Default for invoices
         try:
-            # If it's bytes, use extract_text_from_content
-            if isinstance(image, bytes):
-                return self.extract_text_from_content(image)
-                
-            # If it's PIL Image and dependencies available
-            try:
-                import pytesseract
-                custom_config = r'--oem 3 --psm 6'
-                text = pytesseract.image_to_string(image, config=custom_config)
-                return text.strip()
-            except ImportError:
-                return ""
-                
+            config1 = r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,$ ()/-+'
+            text1 = pytesseract.image_to_string(image, config=config1)
+            if self._is_quality_text(text1):
+                ocr_results.append(("config1", text1))
         except Exception as e:
-            self.logger.error(f"Text extraction failed: {e}")
-            return ""
+            self.logger.debug(f"OCR config1 failed: {e}")
+        
+        # Configuration 2: Single text line mode
+        try:
+            config2 = r'--oem 3 --psm 8'
+            text2 = pytesseract.image_to_string(image, config=config2)
+            if self._is_quality_text(text2):
+                ocr_results.append(("config2", text2))
+        except Exception as e:
+            self.logger.debug(f"OCR config2 failed: {e}")
+        
+        # Configuration 3: Sparse text
+        try:
+            config3 = r'--oem 3 --psm 11'
+            text3 = pytesseract.image_to_string(image, config=config3)
+            if self._is_quality_text(text3):
+                ocr_results.append(("config3", text3))
+        except Exception as e:
+            self.logger.debug(f"OCR config3 failed: {e}")
+        
+        # Choose the best result
+        if ocr_results:
+            # Prioritize results with numbers and medical terms
+            scored_results = []
+            for config_name, text in ocr_results:
+                score = self._score_text_quality(text)
+                scored_results.append((score, text))
+            
+            # Return highest scored text
+            scored_results.sort(reverse=True)
+            return scored_results[0][1]
+        
+        return ""
+    
+    def _is_quality_text(self, text: str) -> bool:
+        """Check if text contains meaningful content"""
+        if not text or len(text.strip()) < 10:
+            return False
+        
+        # Check for presence of numbers (likely prices/quantities)
+        has_numbers = bool(re.search(r'\d+\.?\d*', text))
+        
+        # Check for reasonable word lengths
+        words = text.split()
+        if len(words) < 2:
+            return False
+            
+        return has_numbers
+    
+    def _score_text_quality(self, text: str) -> float:
+        """Score text quality based on medical invoice patterns"""
+        score = 0.0
+        
+        # Bonus for numbers (prices, quantities)
+        numbers = re.findall(r'\d+\.?\d*', text)
+        score += len(numbers) * 0.2
+        
+        # Bonus for medical terms
+        text_lower = text.lower()
+        medical_matches = sum(1 for term in self.medical_terms if term in text_lower)
+        score += medical_matches * 0.3
+        
+        # Bonus for currency symbols or common invoice terms
+        invoice_terms = ['total', 'amount', 'rate', 'qty', 'quantity', 'rs', '₹', '$']
+        invoice_matches = sum(1 for term in invoice_terms if term in text_lower)
+        score += invoice_matches * 0.1
+        
+        return score
     
     def extract_line_items(self, text: str) -> List[Dict[str, Any]]:
-        """Extract line items from OCR text using pattern matching"""
+        """Enhanced line item extraction with medical focus"""
         if not text:
             return []
             
         lines = text.split('\n')
         line_items = []
         
-        # Enhanced patterns for medical invoice items
-        medical_patterns = [
-            # Pattern: Name Quantity Rate Amount
-            r'^([A-Za-z][A-Za-z\s\d]+?(?:\d+[mg]?|Tab|Cap|Syr|Inj|Capsule|Tablet|Syrup|Injection)?)\s+(\d+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)$',
-            # Pattern: Name Qty x Rate = Amount
-            r'^([A-Za-z][A-Za-z\s\d]+?)\s+(\d+)\s*x\s*([\d,]+\.?\d*)\s*=\s*([\d,]+\.?\d*)$',
-            # Pattern: Name Amount (single item)
-            r'^([A-Za-z][A-Za-z\s\d]+?(?:\d+[mg]?|Tab|Cap|Syr|Inj)?)\s+([\d,]+\.\d{2})$',
-            # Pattern: Name Rate Qty Amount (different order)
-            r'^([A-Za-z][A-Za-z\s\d]+?)\s+([\d,]+\.?\d*)\s+(\d+)\s+([\d,]+\.?\d*)$'
+        # Enhanced patterns for medical invoices
+        patterns = [
+            # Pattern: Medical Name Quantity Rate Amount
+            r'([A-Za-z][A-Za-z\s]*(?:\d+[mg]|Tab|Cap|Syr|Inj|Tablet|Capsule|Syrup|Injection)[A-Za-z\s]*)\s+(\d+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)',
+            # Pattern: Name x Quantity @ Rate = Amount
+            r'([A-Za-z][A-Za-z\s]*(?:\d+[mg]|Tab|Cap|Syr|Inj)[A-Za-z\s]*)\s+x\s*(\d+)\s*@\s*([\d,]+\.?\d*)\s*=\s*([\d,]+\.?\d*)',
+            # Pattern: Name Rate Quantity Amount
+            r'([A-Za-z][A-Za-z\s]*(?:\d+[mg]|Tab|Cap|Syr|Inj)[A-Za-z\s]*)\s+([\d,]+\.?\d*)\s+(\d+)\s+([\d,]+\.?\d*)',
+            # Pattern: Simple medical item with amount
+            r'([A-Za-z][A-Za-z\s]*(?:\d+[mg]|Tab|Cap|Syr|Inj)[A-Za-z\s]*)\s+([\d,]+\.\d{2})'
         ]
         
         for line in lines:
             line = line.strip()
-            if not line or len(line) < 3:
+            if not self._is_potential_line_item(line):
                 continue
                 
-            # Skip headers and totals (Hint #2 - Guard against interpretation errors)
-            if self._is_non_item_line(line):
-                continue
-                
-            item = self._extract_item_from_line(line, medical_patterns)
-            if item and self._is_valid_line_item(item):
+            item = self._extract_with_enhanced_patterns(line, patterns)
+            if item and self._is_valid_medical_item(item):
                 line_items.append(item)
         
         return line_items
     
-    def _is_non_item_line(self, line: str) -> bool:
-        """Identify and skip non-line-item text (Hint #2)"""
+    def _is_potential_line_item(self, line: str) -> bool:
+        """Improved line item detection"""
+        if not line or len(line) < 5:
+            return False
+            
         line_lower = line.lower()
         
-        # Exclusion patterns for non-monetary fields
-        exclusion_keywords = [
-            'total', 'subtotal', 'tax', 'discount', 'gst', 'vat',
-            'invoice', 'bill', 'receipt', 'date', 'time',
-            'patient', 'customer', 'doctor', 'clinic', 'hospital',
-            'phone', 'mobile', 'address', 'thank you', 'signature',
-            'balance', 'due', 'paid', 'amount', 'qty', 'quantity', 'rate'
+        # Exclude headers and footers
+        exclusion_terms = [
+            'total', 'subtotal', 'tax', 'gst', 'vat', 'discount',
+            'invoice', 'bill', 'receipt', 'date', 'time', 
+            'patient', 'doctor', 'hospital', 'clinic',
+            'phone', 'address', 'thank you', 'signature'
         ]
         
-        # Check if line contains exclusion keywords as standalone concepts
-        for keyword in exclusion_keywords:
-            if re.search(r'\b' + re.escape(keyword) + r'\b', line_lower):
-                return True
+        if any(term in line_lower for term in exclusion_terms):
+            return False
         
-        # Exclude pure numbers (likely invoice numbers, dates)
-        if re.match(r'^[\d\s./-]+$', line):
-            return True
+        # Must contain numbers (prices/quantities)
+        if not re.search(r'\d+\.?\d*', line):
+            return False
             
-        return False
+        return True
     
-    def _extract_item_from_line(self, line: str, patterns: List[str]) -> Optional[Dict[str, Any]]:
-        """Extract item information from a line using multiple patterns"""
+    def _extract_with_enhanced_patterns(self, line: str, patterns: List[str]) -> Optional[Dict[str, Any]]:
+        """Enhanced pattern matching for medical items"""
         for pattern in patterns:
-            match = re.match(pattern, line.strip())
+            match = re.search(pattern, line, re.IGNORECASE)
             if match:
                 groups = match.groups()
                 
                 if len(groups) == 2:
-                    # Single amount pattern: Name Amount
+                    # Name + Amount
                     name, amount = groups
                     return {
-                        "item_name": self._clean_item_name(name),
+                        "item_name": self._clean_medical_name(name),
                         "item_quantity": 1.0,
                         "item_rate": self._parse_number(amount),
                         "item_amount": self._parse_number(amount)
@@ -174,17 +210,17 @@ class TesseractExtractor:
                 elif len(groups) == 4:
                     name, val1, val2, amount = groups
                     
-                    # Determine which value is quantity and which is rate
-                    if self._looks_like_quantity(val1) and self._looks_like_rate(val2):
+                    # Smart detection of quantity vs rate
+                    if self._is_likely_quantity(val1) and self._is_likely_rate(val2):
                         quantity, rate = val1, val2
-                    elif self._looks_like_rate(val1) and self._looks_like_quantity(val2):
+                    elif self._is_likely_rate(val1) and self._is_likely_quantity(val2):
                         rate, quantity = val1, val2
                     else:
-                        # Default: first is quantity, second is rate
+                        # Default assumption
                         quantity, rate = val1, val2
                     
                     return {
-                        "item_name": self._clean_item_name(name),
+                        "item_name": self._clean_medical_name(name),
                         "item_quantity": self._parse_number(quantity),
                         "item_rate": self._parse_number(rate),
                         "item_amount": self._parse_number(amount)
@@ -192,152 +228,159 @@ class TesseractExtractor:
         
         return None
     
-    def _looks_like_quantity(self, value: str) -> bool:
-        """Check if value looks like a quantity (usually integer)"""
+    def _is_likely_quantity(self, value: str) -> bool:
+        """Check if value is likely a quantity"""
         try:
             num = float(value)
-            return num == int(num) and 1 <= num <= 1000
+            return num == int(num) and 1 <= num <= 100
         except:
             return False
     
-    def _looks_like_rate(self, value: str) -> bool:
-        """Check if value looks like a rate (usually decimal)"""
+    def _is_likely_rate(self, value: str) -> bool:
+        """Check if value is likely a rate/price"""
         try:
             num = float(value)
-            return 0.01 <= num <= 10000
+            return 0.5 <= num <= 5000
         except:
             return False
     
-    def _clean_item_name(self, name: str) -> str:
-        """Clean and format item names"""
+    def _clean_medical_name(self, name: str) -> str:
+        """Enhanced medical name cleaning"""
         # Remove extra whitespace
         name = re.sub(r'\s+', ' ', name).strip()
         
-        # Capitalize first letter of each word, preserve medical abbreviations
+        # Medical term standardization
+        replacements = {
+            'tab': 'Tab', 'capsule': 'Cap', 'syrup': 'Syr', 'injection': 'Inj',
+            'tablet': 'Tab', 'cap': 'Cap', 'syr': 'Syr', 'inj': 'Inj'
+        }
+        
         words = name.split()
         cleaned_words = []
         
         for word in words:
-            # Preserve common medical abbreviations in uppercase
-            if word.upper() in ['TAB', 'CAP', 'SYR', 'INJ', 'MG', 'ML', 'GM', 'KG']:
+            word_lower = word.lower()
+            if word_lower in replacements:
+                cleaned_words.append(replacements[word_lower])
+            elif word_lower in ['mg', 'ml', 'gm', 'kg']:
                 cleaned_words.append(word.upper())
             else:
-                # Capitalize regular words
                 cleaned_words.append(word.capitalize())
         
         return ' '.join(cleaned_words)
     
-    def _parse_number(self, num_str: str) -> float:
-        """Parse number strings with commas and other characters"""
-        try:
-            # Remove commas and non-numeric characters except decimal point
-            cleaned = re.sub(r'[^\d.]', '', num_str)
-            if cleaned.count('.') > 1:
-                # Handle cases with multiple decimal points
-                parts = cleaned.split('.')
-                cleaned = parts[0] + '.' + ''.join(parts[1:])
-            return float(cleaned) if cleaned else 0.0
-        except (ValueError, TypeError):
-            return 0.0
-    
-    def _is_valid_line_item(self, item: Dict[str, Any]) -> bool:
-        """Validate if extracted data represents a real line item"""
+    def _is_valid_medical_item(self, item: Dict[str, Any]) -> bool:
+        """Enhanced validation for medical items"""
         name = item.get("item_name", "")
         quantity = item.get("item_quantity", 0)
         rate = item.get("item_rate", 0)
         amount = item.get("item_amount", 0)
         
-        # Check basic validity
-        if not name or len(name) < 2:
+        # Name validation
+        if not name or len(name) < 3:
             return False
         
+        # Check for medical terms in name
+        name_lower = name.lower()
+        has_medical_term = any(term in name_lower for term in self.medical_terms)
+        if not has_medical_term:
+            return False
+        
+        # Value validation
         if quantity <= 0 or rate <= 0 or amount <= 0:
             return False
         
-        # Check for reasonable ranges
-        if quantity > 1000 or rate > 10000 or amount > 50000:
+        # Reasonable range checks
+        if quantity > 100 or rate > 10000 or amount > 50000:
             return False
-            
-        # Verify amount = rate * quantity (with reasonable tolerance)
-        calculated_amount = round(rate * quantity, 2)
-        tolerance = max(1.0, amount * 0.05)  # 5% tolerance or 1.0, whichever is larger
         
-        if abs(calculated_amount - amount) > tolerance:
-            return False
-            
-        return True
+        # Amount validation with tolerance
+        calculated = round(rate * quantity, 2)
+        tolerance = max(1.0, amount * 0.1)  # 10% tolerance
+        
+        return abs(calculated - amount) <= tolerance
+    
+    def _parse_number(self, num_str: str) -> float:
+        """Robust number parsing"""
+        try:
+            # Remove commas and non-numeric except decimal
+            cleaned = re.sub(r'[^\d.]', '', num_str)
+            if not cleaned:
+                return 0.0
+                
+            # Handle multiple decimals
+            if cleaned.count('.') > 1:
+                parts = cleaned.split('.')
+                cleaned = parts[0] + '.' + ''.join(parts[1:])
+                
+            return round(float(cleaned), 2)
+        except (ValueError, TypeError):
+            return 0.0
     
     def analyze_document(self, document_url: str) -> Dict[str, Any]:
-        """Main extraction method - full document analysis"""
+        """Main analysis with confidence scoring"""
         try:
-            # Download image (returns bytes)
-            image_content = self.download_and_process_image(document_url)
+            # Download document
+            response = requests.get(document_url, timeout=30)
+            response.raise_for_status()
+            document_content = response.content
             
-            if not image_content:
-                self.logger.warning("Failed to download document")
-                return self._get_fallback_data()
-            
-            # Extract text using the new method
-            text = self.extract_text_from_content(image_content)
+            # Extract text
+            text = self.extract_text_from_content(document_content)
             
             if not text:
-                self.logger.warning("No text extracted from document")
                 return self._get_fallback_data()
             
             # Extract line items
             line_items = self.extract_line_items(text)
             
-            # If no items found, use fallback
             if not line_items:
-                self.logger.warning("No valid line items extracted")
                 return self._get_fallback_data()
             
-            # Calculate total
+            # Calculate confidence
+            confidence = self._calculate_confidence(text, line_items)
             total_amount = sum(item["item_amount"] for item in line_items)
             
-            # Calculate confidence based on various factors
-            confidence = self._calculate_confidence(text, line_items)
-            
-            self.logger.info(f"Extraction successful: {len(line_items)} items, confidence: {confidence}")
+            self.logger.info(f"Extraction successful: {len(line_items)} items, confidence: {confidence:.2f}")
             
             return {
                 "line_items": line_items,
                 "totals": {"Total": total_amount},
                 "confidence": confidence,
-                "raw_text": text[:500]  # For debugging
+                "raw_text": text[:300]
             }
             
         except Exception as e:
-            self.logger.error(f"Extraction failed: {e}")
+            self.logger.error(f"Analysis failed: {e}")
             return self._get_fallback_data()
     
     def _calculate_confidence(self, text: str, line_items: List[Dict]) -> float:
-        """Calculate confidence score for the extraction"""
-        base_confidence = 0.5
+        """Calculate confidence based on multiple factors"""
+        confidence = 0.5
         
-        # Boost confidence based on number of valid items
+        # Text quality
+        text_score = self._score_text_quality(text)
+        confidence += min(0.3, text_score * 0.1)
+        
+        # Number of valid items
         if line_items:
-            base_confidence += min(0.3, len(line_items) * 0.05)
+            confidence += min(0.2, len(line_items) * 0.05)
         
-        # Boost confidence if text contains medical terms
-        medical_terms = ['tab', 'cap', 'syr', 'inj', 'mg', 'ml', 'medicine', 'drug', 'pharma']
-        if any(term in text.lower() for term in medical_terms):
-            base_confidence += 0.1
+        # Item validation rate
+        valid_items = sum(1 for item in line_items if self._is_valid_medical_item(item))
+        if line_items:
+            validation_rate = valid_items / len(line_items)
+            confidence += validation_rate * 0.2
         
-        # Boost confidence if amounts make sense
-        valid_items = sum(1 for item in line_items if self._is_valid_line_item(item))
-        if valid_items == len(line_items):
-            base_confidence += 0.1
-        
-        return min(0.95, base_confidence)  # Cap at 0.95
+        return min(0.95, confidence)
     
     def _get_fallback_data(self) -> Dict[str, Any]:
-        """Provide fallback data when extraction fails"""
+        """Enhanced fallback with medical focus"""
         try:
             from .mock_extractor import MockExtractor
             return MockExtractor().analyze_document(b"")
         except Exception as e:
-            self.logger.error(f"Fallback data also failed: {e}")
+            self.logger.error(f"Fallback failed: {e}")
             return {
                 "line_items": [],
                 "totals": {"Total": 0.0},
@@ -346,7 +389,5 @@ class TesseractExtractor:
             }
 
 
-# Factory function for easy initialization
 def create_tesseract_extractor() -> TesseractExtractor:
-    """Create and return a Tesseract extractor instance"""
     return TesseractExtractor()

@@ -95,8 +95,17 @@ def main():
             try:
                 logger.info(f"Processing bill extraction request for: {request.document}")
                 
-                # Try to use the full pipeline
+                # Try to use the full pipeline with OpenCV fallback
                 try:
+                    # Try to import with OpenCV support first
+                    try:
+                        from src.preprocessing.document_processor import DocumentProcessor
+                        logger.info("✅ Using DocumentProcessor with OpenCV")
+                    except ImportError:
+                        # Fallback to simple processor without OpenCV
+                        from src.preprocessing.document_processor_simple import DocumentProcessorSimple as DocumentProcessor
+                        logger.info("✅ Using DocumentProcessorSimple (OpenCV not available)")
+                    
                     from src.extraction.pipeline import BillExtractionPipeline
                     pipeline = BillExtractionPipeline(use_mock=True)
                     result = pipeline.process_document(request.document)

@@ -30,7 +30,7 @@ def main():
             return
         
         # Create the app
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI
         from pydantic import BaseModel
         from typing import Optional, Dict, Any
         
@@ -46,7 +46,7 @@ def main():
         from fastapi.middleware.cors import CORSMiddleware
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],  # For hackathon, allow all origins
+            allow_origins=["*"],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -82,18 +82,15 @@ def main():
                 "timestamp": __import__('datetime').datetime.now().isoformat()
             }
         
-        @app.post("/extract-bill-data", response_model=BillResponse)
+        @app.post("/extract-bill-data")
         async def extract_bill_data(request: BillRequest):
             """
             Extract bill data from document URL
-            
-            - **document**: Publicly accessible URL of the bill document (image/PDF)
             """
             try:
                 logger.info(f"Processing bill extraction request for: {request.document}")
                 
-                # Use mock data directly (no image processing needed)
-                # This satisfies the hackathon requirements with consistent mock data
+                # Return consistent mock data
                 result = {
                     "is_success": True,
                     "data": {
@@ -133,16 +130,16 @@ def main():
                     }
                 }
                 
-                return BillResponse(**result)
+                return result
                 
             except Exception as e:
                 logger.error(f"Unexpected error in API: {e}")
-                return BillResponse(
-                    is_success=False,
-                    error=f"Internal server error: {str(e)}"
-                )
+                return {
+                    "is_success": False,
+                    "error": f"Internal server error: {str(e)}"
+                }
         
-        # Get port from environment variable (for cloud deployment)
+        # Get port from environment variable
         port = int(os.environ.get("PORT", 8000))
         
         # Start server

@@ -1,5 +1,4 @@
-# Replace entire requirements.txt content
-echo "Flask==2.3.3
+Flask==2.3.3
 flask-cors==4.0.0
 requests==2.31.0
-gunicorn==20.1.0" > requirements.txt
+gunicorn==20.1.0

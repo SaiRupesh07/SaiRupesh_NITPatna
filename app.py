@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
@@ -19,7 +20,7 @@ REQUEST_METRICS = {
     "successful_requests": 0,
     "failed_requests": 0,
     "error_breakdown": {},
-    "start_time": datetime.utcnow().isoformat()
+    "start_time": datetime.now(datetime.timezone.utc).isoformat()
 }
 
 class IntelligentBillExtractor:

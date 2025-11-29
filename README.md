@@ -4,7 +4,7 @@
 
 ![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.13+-green.svg)
-![Accuracy](https://img.shields.io/badge/accuracy-97.3%25-brightgreen.svg)
+![Accuracy](https://img.shields.io/badge/accuracy-97.3%25-brightgreen.svg) 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Status](https://img.shields.io/badge/status-production--ready-success.svg)
 

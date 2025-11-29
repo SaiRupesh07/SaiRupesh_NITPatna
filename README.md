@@ -1,4 +1,4 @@
-# 🏥 Intelligent Medical Bill Extraction API
+#  Intelligent Medical Bill Extraction API
 
 <div align="center">
 

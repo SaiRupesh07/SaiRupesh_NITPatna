@@ -1,4 +1,4 @@
-# 🚀 COMPETITION-READY - COMPATIBLE VERSION
+# 🚀 ULTRA-LIGHT - NO SCIKIT-LEARN
 Flask==2.3.3
 Flask-CORS==4.0.0
 requests==2.31.0
@@ -6,6 +6,4 @@ gunicorn==21.2.0
 python-dotenv==1.0.0
 rapidfuzz==3.9.4
 Werkzeug==2.3.7
-scikit-learn==1.2.2
 pytest==7.4.0
-numpy==1.24.3

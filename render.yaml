@@ -1,10 +1,10 @@
-# Delete old render.yaml and create new one
-rm render.yaml
-echo "services:
+services:
   - type: web
-    name: bill-extraction-api
+    name: medai-extract-pro
     env: python
     plan: free
-    pythonVersion: \"3.11.0\"
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:\$PORT" > render.yaml
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

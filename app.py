@@ -40,20 +40,48 @@ class IntelligentBillExtractor:
         }
     
     def _analyze_document_features(self, document_url):
-        """ACTUALLY analyze document to extract features (simulated for now)"""
-        # In production, this would use OCR/text extraction
-        # For now, we'll simulate based on URL patterns and random variation
-        
-        features = {
-            "estimated_complexity": self._estimate_complexity(document_url),
-            "medical_context_strength": self._detect_medical_context(document_url),
-            "likely_bill_type": self._classify_bill_type(document_url),
-            "item_count_estimate": self._estimate_item_count(document_url),
-            "amount_range": self._estimate_amount_range(document_url)
-        }
-        
-        logger.info(f"🔍 DOCUMENT FEATURES EXTRACTED: {features}")
-        return features
+        """Analyze document to extract features.
+
+        Prefer using `RealFeatureExtractor` from `src/extraction/advanced_extractors.py` when available.
+        Fall back to simulated heuristics if import or runtime fails.
+        """
+        try:
+            # Ensure the local `src` directory is on sys.path so imports work when running app.py
+            import importlib, sys
+            src_path = os.path.join(os.path.dirname(__file__), 'src')
+            if src_path not in sys.path:
+                sys.path.insert(0, src_path)
+
+            ae = importlib.import_module('extraction.advanced_extractors')
+            rfe = ae.RealFeatureExtractor()
+            feats = rfe.extract_features(document_url)
+
+            features = {
+                "estimated_complexity": feats.get('layout_complexity', self._estimate_complexity(document_url)),
+                "medical_context_strength": min(1.0, feats.get('medical_terms', 0) / 20),
+                "likely_bill_type": self._classify_bill_type(document_url) if feats.get('table_structures', 0) == 0 else (
+                    'complex_hospital' if feats.get('table_structures', 0) > 2 else self._classify_bill_type(document_url)
+                ),
+                "item_count_estimate": max(1, feats.get('line_count', self._estimate_item_count(document_url))),
+                "amount_range": (
+                    max(0, feats.get('amount_patterns', 1) * 100),
+                    max(1000, feats.get('amount_patterns', 1) * 1000)
+                )
+            }
+
+            logger.info(f"🔍 DOCUMENT FEATURES EXTRACTED (REAL): {features}")
+            return features
+        except Exception:
+            # In case the advanced extractor isn't available or fails, use existing simulated heuristics
+            features = {
+                "estimated_complexity": self._estimate_complexity(document_url),
+                "medical_context_strength": self._detect_medical_context(document_url),
+                "likely_bill_type": self._classify_bill_type(document_url),
+                "item_count_estimate": self._estimate_item_count(document_url),
+                "amount_range": self._estimate_amount_range(document_url)
+            }
+            logger.info(f"🔍 DOCUMENT FEATURES EXTRACTED (SIMULATED): {features}")
+            return features
     
     def _estimate_complexity(self, document_url):
         """Estimate bill complexity based on URL patterns"""
@@ -347,84 +375,7 @@ class IntelligentBillExtractor:
             "bill_type": "fallback",
             "medical_terms_count": 6
         }
-    def __init__(self):
-        self.ace_engine_active = True
-        self.real_time_learning_active = True
-    
-    def _process_hospital_bill_template(self):
-        """ALWAYS RETURN ADVANCED HOSPITAL BILL DATA"""
-        return {
-            "line_items": [
-                {"item_name": "Specialist Consultation", "item_amount": 1500.0, "item_rate": 1500.0, "item_quantity": 1},
-                {"item_name": "Advanced MRI Scan", "item_amount": 3500.0, "item_rate": 3500.0, "item_quantity": 1},
-                {"item_name": "Comprehensive Blood Tests", "item_amount": 1200.0, "item_rate": 1200.0, "item_quantity": 1},
-                {"item_name": "Prescription Medication", "item_amount": 845.75, "item_rate": 281.92, "item_quantity": 3},
-                {"item_name": "Room Charges (3 days)", "item_amount": 4500.0, "item_rate": 1500.0, "item_quantity": 3},
-                {"item_name": "Surgical Procedure", "item_amount": 15000.0, "item_rate": 15000.0, "item_quantity": 1},
-                {"item_name": "Anesthesia Services", "item_amount": 1200.0, "item_rate": 1200.0, "item_quantity": 1},
-                {"item_name": "Post-Operative Care", "item_amount": 800.0, "item_rate": 800.0, "item_quantity": 1},
-                {"item_name": "Physical Therapy Sessions", "item_amount": 1200.0, "item_rate": 400.0, "item_quantity": 3},
-                {"item_name": "Medical Equipment Rental", "item_amount": 500.0, "item_rate": 500.0, "item_quantity": 1}
-            ],
-            "totals": {"Total": 30245.75},
-            "confidence": 0.987,
-            "bill_type": "complex_hospital",
-            "medical_terms_count": 28,
-            "ace_analysis": {
-                "extraction_confidence": 0.95,
-                "medical_context_score": 0.98,
-                "amount_validation_score": 0.99,
-                "layout_understanding": 0.92,
-                "data_consistency": 0.96,
-                "overall_reliability": 0.987,
-                "risk_level": "LOW",
-                "recommendation": "PRODUCTION_READY"
-            }
-        }
-    
-    def intelligent_extraction(self, document_url):
-        """ALWAYS USE ADVANCED PROCESSING"""
-        try:
-            logger.info(f"🚀 ACTIVATING 98.7% ACCURACY SYSTEM for: {document_url}")
-            
-            # Always return the advanced hospital template
-            result = self._process_hospital_bill_template()
-            
-            # Add real-time learning info
-            result["real_time_learning"] = {
-                "active": True,
-                "predictions_applied": 3,
-                "learning_metrics": {
-                    "total_learning_opportunities": 47,
-                    "successful_predictions": 42,
-                    "prediction_success_rate": "89.4%",
-                    "accuracy_improvement": "+0.5%"
-                }
-            }
-            
-            result["processing_time"] = 0.8
-            result["analysis_method"] = "real_time_learning_enhanced"
-            result["adaptive_processing"] = True
-            result["pipeline_used"] = {"pipeline": "expert_medical", "complexity": "high", "method": "multi_model_fusion"}
-            
-            logger.info(f"✅ 98.7% ACCURACY DELIVERED: {len(result['line_items'])} items, ${result['totals']['Total']} total")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Advanced extraction failed: {e}")
-            # Fallback with better data
-            return {
-                "line_items": [
-                    {"item_name": "Emergency Consultation", "item_amount": 800.0, "item_rate": 800.0, "item_quantity": 1},
-                    {"item_name": "CT Scan", "item_amount": 2500.0, "item_rate": 2500.0, "item_quantity": 1},
-                    {"item_name": "Lab Tests", "item_amount": 600.0, "item_rate": 600.0, "item_quantity": 1},
-                    {"item_name": "Medication", "item_amount": 350.0, "item_rate": 175.0, "item_quantity": 2}
-                ],
-                "totals": {"Total": 4250.0},
-                "confidence": 0.94,
-                "bill_type": "emergency_care",
-                "medical_terms_count": 8
-            }
+
 
 # Initialize extractor
 extractor = IntelligentBillExtractor()
@@ -485,8 +436,22 @@ def upload_and_extract():
         file_content = file.read()
         file_type = file.filename.split('.')[-1].lower()
         
-        # Enhanced extraction with file context
-        extraction_result = extractor.intelligent_extraction(f"uploaded://{file.filename}")
+        # Enhanced extraction with file context - use EnsembleExtractor when available
+        try:
+            import importlib, sys
+            src_path = os.path.join(os.path.dirname(__file__), 'src')
+            if src_path not in sys.path:
+                sys.path.insert(0, src_path)
+            ae = importlib.import_module('extraction.advanced_extractors')
+            ensemble = ae.EnsembleExtractor()
+            # Pass raw file content so OCR can run
+            extraction_result = ensemble.extract(f"uploaded://{file.filename}", document_content=file_content)
+        except Exception:
+            # Fall back to existing extractor (best-effort)
+            try:
+                extraction_result = extractor.intelligent_extraction(f"uploaded://{file.filename}")
+            except Exception:
+                extraction_result = extractor._generate_fallback_bill()
         
         # Add file-specific analysis
         extraction_result["file_analysis"] = {
